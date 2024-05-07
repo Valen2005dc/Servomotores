@@ -1,0 +1,194 @@
+#include "Stm32f401xe.h"
+#include "stm32f4xx.h"
+#include "Ssd1306.h"
+#include "I2c.h"
+#include "Pwm.h"
+
+I2c Ic;
+Pwm Serv;
+SSD1306 O;
+
+float grad1=0.0,grad2=0.0;
+float entrada=0.0;
+int n1=0,n2=0,Sen,al=0,bl=0;
+float GRAD1=0,GRAD2=0;
+bool ing=true;
+char tacos[100];
+char Text[100],TExt[100];
+char Text2[10]="";
+char Text3[10]="";
+char Text4[10]="";
+
+
+char Testt[10]="OK \r\n";
+char I[10],F[10];
+unsigned int ccr;
+
+void delay(int ms){ 
+	int i;
+	for(; ms>0 ;ms--) {
+		for(i =0; i<3195;i++);
+	}
+} 
+void TxDato(unsigned char d){// Método para transmitir un dato
+ while(!(USART2->SR&USART_SR_TXE)); // Se espera buffer disponible
+ USART2->DR=d; // Se transmite dato 
+}
+
+void MandarDato(char *t){
+	int n;
+ // Transmite datos hasta carácter nulo  
+ n=0;while(I[n]!=0)TxDato(I[n++]);
+ n=0;while(t[n]!=0)TxDato(t[n++]); 
+ n=0;while(F[n]!=0)TxDato(F[n++]);
+}
+extern "C"{
+void USART6_IRQHandler (void){
+	unsigned char d;
+	d=USART6->DR; //Obtiene dato
+	switch(d){
+		case 'a':case 'A':
+			al++;
+			bl=0;
+			break;		
+		case 'b':case 'B': 
+			bl++;
+			al=0;
+			break;
+		case '0':case '1':case '2':case '3':case '4':case '5':case '6':case '7':case '8':case '9':
+			if(al>=1){
+		Text2[n1++]=d;Text2[n1]=0;
+			}
+			else if(bl>=1){
+		Text3[n1++]=d;Text3[n1]=0;
+			}
+			else{
+			Text4[n1++]=d;Text4[n1]=0;}
+		break;
+		case 13: 
+			GRAD1=atof(Text2); //a
+			GRAD2=atof(Text3); //b
+			n1=0;
+			
+		break;
+		default: break;
+	}
+
+	}
+
+void  Pwm_init(void){
+	//GPIOA->AFR[0]|=(1UL<<GPIO_AFRL_AFSEL0_Pos)|(1UL<<GPIO_AFRL_AFSEL1_Pos); // Función alternativa 1 en pin PA0
+	//GPIOA->MODER|=(2UL<<GPIO_MODER_MODER0_Pos)|(2UL<<GPIO_MODER_MODER1_Pos); // Pin PA0 modo alternativo
+	//RCC->APB1ENR|=RCC_APB1ENR_TIM2EN; //enable clock access tto tim2
+	//TIM2->PSC=4; //set prescaller to 4 (16000000Hz/4=4000000Hz)
+	//TIM2->ARR=63999; //set the maximum count value 
+	//TIM2->CNT=0; //seset the current count
+	//TIM2->CCMR1=0x60; //configure the pins as PWM
+	//TIM2->CCMR2=0x60;
+	//TIM2->CCER|=0x1; //enbale channel1 and channel2
+	//TIM2->CR1=1; //enable timer
+	Serv.IniciarPwm(2,50);
+	Serv.PinCanal(PA0);
+	Serv.PinCanal(PA1);
+	Serv.ActivarCanal(1);
+	Serv.ActivarCanal(2);
+}
+	//(30,0,180,2500,7000)
+float map(long x, long in_min, long in_max, long out_min, long out_max)
+{
+  return ((x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min);
+}
+
+void servo1_write(uint8_t angle)
+	{
+	
+	if(angle<0){angle=0;}
+	if(angle>180){angle=180;}
+	
+	Serv.SetDuty(1,map(angle,0,180,100,200)/16);
+	
+	}
+
+void servo2_write(uint8_t angle)
+	{
+	
+	if(angle<0){angle=0;}
+	if(angle>180){angle=180;}
+	
+	
+	Serv.SetDuty(2,map(angle,0,180,100,200)/16);
+	
+	}
+	
+void SysTick_Handler(void) {
+	sprintf(Text,"Servo 1 =%.2f",GRAD1);
+	sprintf(TExt,"Servo 2 =%.2f",GRAD2);
+	//MandarDato(Testt);
+	O.BorrarPantalla();
+	O.PrintTexto(1,20,Text);
+	O.PrintTexto(1,32,TExt);
+	O.Refrescar();
+}
+}
+
+
+int main(void){	
+SystemCoreClockUpdate();
+SysTick_Config(SystemCoreClock*1);
+
+RCC->AHB1ENR|=RCC_AHB1ENR_GPIOAEN; // Activa reloj GPIOA
+	// USART
+GPIOA->MODER |=(2UL<<GPIO_MODER_MODER11_Pos); // Pin PA2 modo alternativo
+GPIOA->MODER |=(2UL<<GPIO_MODER_MODER12_Pos); // Pin PA3 modo alternativo
+GPIOA->AFR[1]|=(8UL<<GPIO_AFRH_AFSEL11_Pos); // Función alternativa 7 en pin PA2
+GPIOA->AFR[1]|=(8UL<<GPIO_AFRH_AFSEL12_Pos); // Función alternativa 7 en pin PA3
+RCC->APB2ENR|=RCC_APB2ENR_USART6EN; // Activa reloj USART2
+USART6->BRR=(unsigned int) (16000000/9600); // Define 9600 bps
+USART6->CR1|=(USART_CR1_RE |USART_CR1_TE); // Activa Tx y Rx
+USART6->CR2=0;
+USART6->CR3=0;
+USART6->CR1|=USART_CR1_UE; // Activa Usart 
+NVIC_EnableIRQ(USART6_IRQn);// Activa vector interrupción
+USART6->CR1|=USART_CR1_RXNEIE; // Activa servicio de interrupción
+//PWM
+Pwm_init();
+
+
+//I2C1
+Ic.Iniciar(PB9,PB8,400000);
+
+ //Componentes
+ O.SetI2c(&Ic);
+ O.IniciarGLCD();
+ //O.Test();
+ //MandarDato(Testt);
+ //Bucle infinito
+	for (int pos1 = 0; pos1 <= 180; pos1 += 1) { // goes from 0 degrees to 180 degrees
+    // in steps of 1 degree
+    servo1_write(pos1);
+		delay(1);
+		servo2_write(pos1); // tell servo to go to position in variable 'pos'
+    delay(1);                       // waits 15ms for the servo to reach the position
+  }
+	for (int pos1 = 180; pos1 >= 0; pos1 -= 1) { // goes from 180 degrees to 0 degrees
+    servo1_write(pos1);
+		delay(1);
+		servo2_write(pos1); // tell servo to go to position in variable 'pos'
+    delay(1);                       // waits 15ms for the servo to reach the position
+  }
+	int r=0;
+while(1){	
+		servo1_write(GRAD1);
+		delay(15);
+		servo2_write(GRAD2);
+		delay(15);
+		if(r=100){
+		ing^=ing;
+		(ing) ? O.PrintTexto(0,42," ") : O.PrintTexto(0,42,"|");
+		O.Refrescar();
+		r=0;
+		}
+		r++;
+	}
+return 0;
+}
